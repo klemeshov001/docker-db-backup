@@ -192,6 +192,13 @@ Be sure to view the following repositories to understand all the customizable op
 | `CONTAINER_MONITORING_BACKEND` | Choose monitoring backend: `zabbix` or `prometheus`                                                                              | `zabbix`        |
 | `PROMETHEUS_PORT` | Port for Prometheus metrics endpoint                                                                                             | `9090`          |
 | `DEBUG_PROMETHEUS` | Enable debug logging for Prometheus metrics                                                                                     | `FALSE`         |
+| `YANDEX_LOCKBOX_SECRET_IDS` | Comma-separated list of Yandex Lockbox secret IDs to load                                                                      | ``              |
+| `YANDEX_LOCKBOX_AUTH_TYPE` | Authentication type: metadata, key, or service-account-key                                                                     | `metadata`      |
+| `YANDEX_LOCKBOX_SERVICE_ACCOUNT_KEY` | JSON service account key for key authentication                                                                               | ``              |
+| `YANDEX_LOCKBOX_SERVICE_ACCOUNT_ID` | Service account ID for key authentication                                                                                     | ``              |
+| `YANDEX_LOCKBOX_METADATA_URL` | Yandex Cloud metadata service URL                                                                                              | `http://169.254.169.254/computeMetadata/v1/instance/service-accounts/default/token` |
+| `YANDEX_LOCKBOX_API_URL` | Yandex Lockbox API URL                                                                                                          | `https://payload.lockbox.api.cloud.yandex.net/lockbox/v1/secrets` |
+| `DEBUG_YANDEX_LOCKBOX` | Enable debug logging for Yandex Lockbox operations                                                                             | `FALSE`         |
 
 #### Job Defaults
 If these are set and no other defaults or variables are set explicitly, they will be added to any of the backup jobs.
