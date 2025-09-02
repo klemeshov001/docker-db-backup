@@ -1,0 +1,13 @@
+#!/command/with-contenv bash
+
+# Yandex Lockbox configuration
+YANDEX_LOCKBOX_SECRET_IDS=${YANDEX_LOCKBOX_SECRET_IDS:-""}
+YANDEX_LOCKBOX_METADATA_URL=${YANDEX_LOCKBOX_METADATA_URL:-"http://169.254.169.254/computeMetadata/v1/instance/service-accounts/default/token"}
+YANDEX_LOCKBOX_API_URL=${YANDEX_LOCKBOX_API_URL:-"https://payload.lockbox.api.cloud.yandex.net/lockbox/v1/secrets"}
+
+# Authentication configuration
+YANDEX_LOCKBOX_AUTH_TYPE=${YANDEX_LOCKBOX_AUTH_TYPE:-"metadata"}  # metadata, key, or service-account-key
+YANDEX_LOCKBOX_SERVICE_ACCOUNT_KEY=${YANDEX_LOCKBOX_SERVICE_ACCOUNT_KEY:-""}  # JSON key for service account
+YANDEX_LOCKBOX_SERVICE_ACCOUNT_ID=${YANDEX_LOCKBOX_SERVICE_ACCOUNT_ID:-""}  # Service account ID for key auth
+
+DEBUG_YANDEX_LOCKBOX=${DEBUG_YANDEX_LOCKBOX:-"FALSE"}

@@ -1,0 +1,70 @@
+version: '3.8'
+
+services:
+  # Example database
+  example-db:
+    hostname: example-db-host
+    container_name: example-db
+    image: tiredofit/mariadb:10.11
+    ports:
+      - 3306:3306
+    volumes:
+      - ./db:/var/lib/mysql
+    environment:
+      - ROOT_PASS=examplerootpassword
+      - DB_NAME=example
+      - DB_USER=example
+      - DB_PASS=examplepassword
+    restart: always
+    networks:
+      - example-db-network
+
+  # DB Backup with Yandex Lockbox key authentication
+  example-db-backup:
+    container_name: example-db-backup
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    environment:
+      - TIMEZONE=Europe/Moscow
+      - CONTAINER_NAME=example-db-backup
+      - CONTAINER_ENABLE_MONITORING=TRUE
+      - CONTAINER_MONITORING_BACKEND=prometheus
+      - DEBUG_MODE=FALSE
+
+      # Yandex Lockbox configuration with key authentication
+      - YANDEX_LOCKBOX_SECRET_IDS=e1q2w3e4r5t6y7u8i9o0p
+      - YANDEX_LOCKBOX_AUTH_TYPE=key
+      # Replace with your actual service account key
+      - YANDEX_LOCKBOX_SERVICE_ACCOUNT_KEY={"id":"aje...","service_account_id":"aje...","private_key":"-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC...\n-----END PRIVATE KEY-----\n"}
+      - DEBUG_YANDEX_LOCKBOX=FALSE
+
+      # Backup configuration
+      - BACKUP_JOB_CONCURRENCY=1
+      - DEFAULT_CHECKSUM=NONE
+      - DEFAULT_COMPRESSION=ZSTD
+      - DEFAULT_BACKUP_INTERVAL=1440  # Every 24 hours
+      - DEFAULT_BACKUP_BEGIN=+0
+      - DEFAULT_CLEANUP_TIME=10080    # Keep for 7 days
+
+      # Database configuration (passwords will be loaded from Lockbox)
+      - DB01_TYPE=mariadb
+      - DB01_HOST=example-db-host
+      - DB01_NAME=example
+      - DB01_USER=example
+      # DB01_PASS will be loaded from Yandex Lockbox
+      - DB01_BACKUP_INTERVAL=1440
+      - DB01_BACKUP_BEGIN=+0
+      - DB01_CLEANUP_TIME=10080
+      - DB01_CHECKSUM=SHA1
+      - DB01_COMPRESSION=GZ
+
+    restart: always
+    networks:
+      - example-db-network
+    depends_on:
+      - example-db
+
+networks:
+  example-db-network:
+    driver: bridge
