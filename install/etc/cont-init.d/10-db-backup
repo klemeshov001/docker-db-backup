@@ -3,6 +3,7 @@
 source /assets/functions/00-container
 prepare_service single
 prepare_service 03-monitoring
+prepare_service 11-yandex-lockbox
 PROCESS_NAME="db-backup"
 output_off
 
@@ -19,11 +20,6 @@ if var_true "${CONTAINER_ENABLE_MONITORING}" && [ "${CONTAINER_MONITORING_BACKEN
     start_prometheus_server
 fi
 
-# Load secrets from Yandex Lockbox if configured
-if [ -n "${YANDEX_LOCKBOX_SECRET_IDS}" ]; then
-    source /assets/functions/11-yandex-lockbox
-    source /assets/defaults/11-yandex-lockbox
-    load_yandex_lockbox_secrets
-fi
+# Yandex Lockbox secrets are loaded by 11-yandex-lockbox service
 
 liftoff
