@@ -1,0 +1,82 @@
+services:
+  # PostgreSQL database for local development
+  postgres-db:
+    hostname: postgres-db-host
+    container_name: postgres-db
+    image: postgres:15-alpine
+    ports:
+      - 5432:5432
+    volumes:
+      - ./examples/postgres-data:/var/lib/postgresql/data
+      - ./examples/init-scripts:/docker-entrypoint-initdb.d
+    environment:
+      - POSTGRES_DB=testdb
+      - POSTGRES_USER=testuser
+      - POSTGRES_PASSWORD=testpassword
+      - POSTGRES_ROOT_PASSWORD=rootpassword
+    restart: always
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U testuser -d testdb"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - db-backup-local-network
+
+
+  # DB Backup service for local development
+  db-backup:
+    container_name: db-backup-local
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - backup-data:/backup
+      - ./examples/post-script.sh:/assets/custom-scripts/post-script.sh:ro
+    environment:
+      - TIMEZONE=Europe/Moscow
+      - CONTAINER_NAME=db-backup-local
+      - CONTAINER_ENABLE_MONITORING=TRUE
+      - CONTAINER_MONITORING_BACKEND=prometheus
+      - DEBUG_MODE=FALSE
+      - LOG_LEVEL=debug
+
+      # Yandex Lockbox configuration (disabled for local)
+      # - YANDEX_LOCKBOX_SECRET_IDS=
+      # - YANDEX_LOCKBOX_AUTH_TYPE=metadata
+      - DEBUG_YANDEX_LOCKBOX=FALSE
+
+      # Backup configuration
+      - BACKUP_JOB_CONCURRENCY=1
+      - DEFAULT_CHECKSUM=SHA1
+      - DEFAULT_COMPRESSION=GZ
+      - DEFAULT_BACKUP_INTERVAL=30        # Every 30 minutes for testing
+      - DEFAULT_BACKUP_BEGIN=+0           # Start immediately
+      - DEFAULT_CLEANUP_TIME=180          # Keep for 3 hours
+
+      # Database configuration
+      - DB01_TYPE=postgres
+      - DB01_HOST=postgres-db-host
+      - DB01_NAME=testdb
+      - DB01_USER=testuser
+      - DB01_PASS=testpassword
+      - DB01_BACKUP_INTERVAL=30
+      - DB01_BACKUP_BEGIN=+0
+      - DB01_CLEANUP_TIME=180
+      - DB01_CHECKSUM=SHA1
+      - DB01_COMPRESSION=GZ
+
+    restart: always
+    networks:
+      - db-backup-local-network
+    depends_on:
+      postgres-db:
+        condition: service_healthy
+
+volumes:
+  backup-data:
+    driver: local
+
+networks:
+  db-backup-local-network:
+    driver: bridge

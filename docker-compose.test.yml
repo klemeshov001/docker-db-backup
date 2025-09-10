@@ -1,0 +1,62 @@
+services:
+  # DB Backup service for test environment
+  db-backup:
+    image: cr.yandex/your-registry/db-backup:${TAG:-latest}
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+    environment:
+      - TIMEZONE=Europe/Moscow
+      - CONTAINER_NAME=db-backup-test
+      - CONTAINER_ENABLE_MONITORING=TRUE
+      - CONTAINER_MONITORING_BACKEND=prometheus
+      - DEBUG_MODE=FALSE
+      - LOG_LEVEL=debug
+
+      # Yandex Lockbox configuration for test
+      - YANDEX_LOCKBOX_SECRET_IDS=${YANDEX_LOCKBOX_SECRET_IDS:-}
+      - YANDEX_LOCKBOX_AUTH_TYPE=${YANDEX_LOCKBOX_AUTH_TYPE:-metadata}
+      - DEBUG_YANDEX_LOCKBOX=${DEBUG_YANDEX_LOCKBOX:-TRUE}
+
+      # Backup configuration
+      - BACKUP_JOB_CONCURRENCY=1
+      - DEFAULT_CHECKSUM=SHA1
+      - DEFAULT_COMPRESSION=ZSTD
+      - DEFAULT_BACKUP_INTERVAL=1440      # Every 24 hours
+      - DEFAULT_BACKUP_BEGIN=+0
+      - DEFAULT_CLEANUP_TIME=10080        # Keep for 7 days
+
+      # Database configuration (passwords from Lockbox)
+      - DB01_TYPE=${DB01_TYPE:-mariadb}
+      - DB01_HOST=${DB01_HOST:-test-db-host}
+      - DB01_NAME=${DB01_NAME:-testdb}
+      - DB01_USER=${DB01_USER:-testuser}
+      # DB01_PASS will be loaded from Yandex Lockbox
+      - DB01_BACKUP_INTERVAL=1440
+      - DB01_BACKUP_BEGIN=+0
+      - DB01_CLEANUP_TIME=10080
+      - DB01_CHECKSUM=SHA1
+      - DB01_COMPRESSION=ZSTD
+
+      # S3 configuration (if using S3 storage)
+      - S3_BUCKET=${S3_BUCKET:-test-backup-bucket}
+      - S3_ENDPOINT=${S3_ENDPOINT:-https://storage.yandexcloud.net}
+      - S3_ACCESS_KEY_ID=${S3_ACCESS_KEY_ID:-}
+      - S3_SECRET_ACCESS_KEY=${S3_SECRET_ACCESS_KEY:-}
+      # S3 credentials will be loaded from Yandex Lockbox
+
+    networks:
+      - db-backup-test-network
+
+networks:
+  db-backup-test-network:
+    driver: overlay
+    attachable: true
