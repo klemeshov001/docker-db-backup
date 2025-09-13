@@ -54,7 +54,7 @@ The image will also allow you to use environment variables or Docker secrets use
 
 The script can also be executed skipping the interactive mode by using the following syntax/
 
-    $(basename "$0") <filename> <db_type> <db_hostname> <db_name> <db_user> <db_passук> <db_port>
+    $(basename "$0") <filename> <db_type> <db_hostname> <db_name> <db_user> <db_pass> <db_port>
 
 If you only enter some of the arguments you will be prompted to fill them in.
 
