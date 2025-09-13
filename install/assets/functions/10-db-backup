@@ -30,6 +30,27 @@ bootstrap_filesystem() {
 
 bootstrap_variables() {
     if var_true "${DEBUG_BOOTSTRAP_VARIABLES}" ; then debug on; fi
+    
+    # Load Yandex Lockbox secrets if available
+    load_lockbox_secrets_if_available() {
+        # Check if Yandex Lockbox functions are available
+        if [ -f "/assets/functions/11-yandex-lockbox" ]; then
+            # Load defaults first
+            if [ -f "/assets/defaults/11-yandex-lockbox" ]; then
+                source /assets/defaults/11-yandex-lockbox
+            fi
+            source /assets/functions/11-yandex-lockbox
+            
+            # Load secrets if configured
+            if [ -n "$YANDEX_LOCKBOX_SECRET_IDS" ]; then
+                print_notice "Loading secrets from Yandex Lockbox for bootstrap_variables"
+                load_yandex_lockbox_secrets
+            fi
+        fi
+    }
+    
+    # Load Lockbox secrets before processing variables
+    load_lockbox_secrets_if_available
     backup_init() {
         backup_instance_number=${1}
         backup_instance_vars=$(mktemp)

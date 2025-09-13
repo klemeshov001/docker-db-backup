@@ -84,7 +84,7 @@ get_iam_token_from_yc_cli() {
         # Set cloud-id if provided
         if [ -n "$YANDEX_LOCKBOX_YC_CLOUD_ID" ]; then
             if var_true "${DEBUG_YANDEX_LOCKBOX}" ; then 
-                echo "[DEBUG] Setting cloud-id: ${YANDEX_LOCKBOX_YC_CLOUD_ID}" >&2
+                echo "[DEBUG] Setting cloud-id" >&2
             fi
             yc config set cloud-id "$YANDEX_LOCKBOX_YC_CLOUD_ID" --profile "${YANDEX_LOCKBOX_YC_PROFILE}" >/dev/null 2>&1
         fi
@@ -92,7 +92,7 @@ get_iam_token_from_yc_cli() {
         # Set folder-id if provided
         if [ -n "$YANDEX_LOCKBOX_YC_FOLDER_ID" ]; then
             if var_true "${DEBUG_YANDEX_LOCKBOX}" ; then 
-                echo "[DEBUG] Setting folder-id: ${YANDEX_LOCKBOX_YC_FOLDER_ID}" >&2
+                echo "[DEBUG] Setting folder-id" >&2
             fi
             yc config set folder-id "$YANDEX_LOCKBOX_YC_FOLDER_ID" --profile "${YANDEX_LOCKBOX_YC_PROFILE}" >/dev/null 2>&1
         fi
@@ -140,14 +140,13 @@ get_secret() {
     if [ $iam_token_exit_code -ne 0 ] || [ -z "$iam_token" ]; then
         print_error "Failed to get IAM token for secret ${secret_id}"
         if var_true "${DEBUG_YANDEX_LOCKBOX}" ; then 
-            echo "[DEBUG] IAM token exit code: $iam_token_exit_code" >&2 >&2
-            echo "[DEBUG] IAM token value: '$iam_token'" >&2 >&2
+            echo "[DEBUG] IAM token exit code: $iam_token_exit_code" >&2
         fi
         return 1
     fi
     
     if var_true "${DEBUG_YANDEX_LOCKBOX}" ; then 
-        echo "[DEBUG] IAM token obtained successfully, length: ${#iam_token}" >&2 >&2
+        echo "[DEBUG] IAM token obtained successfully" >&2
     fi
     
     # Get secret payload
@@ -168,7 +167,7 @@ get_secret() {
         echo "$secret_response" > "$temp_file"
         
         if var_true "${DEBUG_YANDEX_LOCKBOX}" ; then 
-            echo "[DEBUG] Lockbox API response for secret ${secret_id}: $secret_response" >&2 >&2
+            echo "[DEBUG] Lockbox API response received for secret ${secret_id}" >&2
         fi
         
         # Check if response contains error
@@ -189,11 +188,23 @@ get_secret() {
         
         while IFS= read -r line; do
             local entry
-            entry=$(jq -r --argjson index $id_items '.entries[$index | tonumber] | "\(.key)=\(.textValue)"' "$temp_file" 2>/dev/null)
+            # Try different value fields that might be used in Lockbox
+            entry=$(jq -r --argjson index $id_items '.entries[$index | tonumber] | "\(.key)=\(.text_value // .textValue // .value // .binaryValue // "null")"' "$temp_file" 2>/dev/null)
             
             if [ $? -eq 0 ] && [ -n "$entry" ] && [ "$entry" != "null=null" ]; then
-                echo "export $entry" >> "$secrets_file"
-                if var_true "${DEBUG_YANDEX_LOCKBOX}" ; then echo "[DEBUG] Added secret: ${entry%%=*}" >&2 >&2; fi
+                # Properly escape the value for shell export
+                local var_name="${entry%%=*}"
+                local var_value="${entry#*=}"
+                # Escape special characters in the value
+                var_value=$(printf '%q' "$var_value")
+                echo "export ${var_name}=${var_value}" >> "$secrets_file"
+                if var_true "${DEBUG_YANDEX_LOCKBOX}" ; then 
+                    echo "[DEBUG] Added secret: ${var_name}" >&2
+                fi
+            else
+                if var_true "${DEBUG_YANDEX_LOCKBOX}" ; then 
+                    echo "[DEBUG] Skipped entry (index $id_items)" >&2
+                fi
             fi
             
             ((id_items++))
@@ -204,26 +215,78 @@ get_secret() {
             chmod 755 "$secrets_file"
             print_notice "Loaded ${id_items} secrets from Lockbox secret ${secret_id}"
             
-            # Export variables to global environment by appending to container environment file
+            if var_true "${DEBUG_YANDEX_LOCKBOX}" ; then 
+                echo "[DEBUG] Secrets file created successfully" >&2
+            fi
+            
+            # Export variables to global environment
             local container_env_file="/etc/container_environment"
+            local global_env_file="/etc/environment"
+            
+            # Method 1: For s6-overlay containers, write to individual environment files
             if [ -d "$container_env_file" ]; then
-                # For s6-overlay containers, write to individual environment files
                 while IFS= read -r line; do
                     if [[ "$line" =~ ^export[[:space:]]+([^=]+)=(.*)$ ]]; then
                         local var_name="${BASH_REMATCH[1]}"
                         local var_value="${BASH_REMATCH[2]}"
-                        # Remove quotes if present
+                        # Remove quotes if present and unescape
                         var_value=$(echo "$var_value" | sed 's/^"//;s/"$//')
+                        # Unescape the value for environment files
+                        var_value=$(printf '%b' "$var_value")
                         echo "$var_value" > "${container_env_file}/${var_name}"
                         if var_true "${DEBUG_YANDEX_LOCKBOX}" ; then 
                             echo "[DEBUG] Exported variable to container environment: ${var_name}" >&2
                         fi
                     fi
                 done < "$secrets_file"
-            else
-                # Fallback: source the secrets file (original behavior)
-                source "$secrets_file"
             fi
+            
+            # Method 2: Create a profile script that will be sourced by all processes
+            local profile_script="/etc/profile.d/lockbox-secrets.sh"
+            if [ -w "$(dirname "$profile_script")" ]; then
+                while IFS= read -r line; do
+                    if [[ "$line" =~ ^export[[:space:]]+([^=]+)=(.*)$ ]]; then
+                        local var_name="${BASH_REMATCH[1]}"
+                        local var_value="${BASH_REMATCH[2]}"
+                        # Remove quotes if present and unescape
+                        var_value=$(echo "$var_value" | sed 's/^"//;s/"$//')
+                        # Unescape the value for environment files
+                        var_value=$(printf '%b' "$var_value")
+                        # Remove existing line if present
+                        sed -i "/^export ${var_name}=/d" "$profile_script" 2>/dev/null || true
+                        # Add new line
+                        echo "export ${var_name}=\"${var_value}\"" >> "$profile_script"
+                        if var_true "${DEBUG_YANDEX_LOCKBOX}" ; then 
+                            echo "[DEBUG] Exported variable to profile script: ${var_name}" >&2
+                        fi
+                    fi
+                done < "$secrets_file"
+                chmod 644 "$profile_script"
+            fi
+            
+            # Method 3: Append to global environment file for all processes
+            if [ -f "$global_env_file" ] || [ -w "$(dirname "$global_env_file")" ]; then
+                while IFS= read -r line; do
+                    if [[ "$line" =~ ^export[[:space:]]+([^=]+)=(.*)$ ]]; then
+                        local var_name="${BASH_REMATCH[1]}"
+                        local var_value="${BASH_REMATCH[2]}"
+                        # Remove quotes if present and unescape
+                        var_value=$(echo "$var_value" | sed 's/^"//;s/"$//')
+                        # Unescape the value for environment files
+                        var_value=$(printf '%b' "$var_value")
+                        # Remove existing line if present
+                        sed -i "/^${var_name}=/d" "$global_env_file" 2>/dev/null || true
+                        # Add new line
+                        echo "${var_name}=${var_value}" >> "$global_env_file"
+                        if var_true "${DEBUG_YANDEX_LOCKBOX}" ; then 
+                            echo "[DEBUG] Exported variable to global environment: ${var_name}" >&2
+                        fi
+                    fi
+                done < "$secrets_file"
+            fi
+            
+            # Method 3: Fallback - source the secrets file (original behavior)
+            source "$secrets_file"
             
             # Clean up temporary files
             rm -f "$temp_file" "$secrets_file"
@@ -280,6 +343,7 @@ load_yandex_lockbox_secrets() {
     else
         print_warn "Loaded ${success_count}/${total_count} secrets from Yandex Lockbox"
     fi
+    
     
     if var_true "${DEBUG_YANDEX_LOCKBOX}" ; then 
         echo "[DEBUG] Function completed" >&2

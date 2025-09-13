@@ -5,25 +5,4 @@ prepare_service single
 PROCESS_NAME="yandex-lockbox"
 output_off
 
-# Load Yandex Lockbox configuration and functions
-source /assets/functions/11-yandex-lockbox
-source /assets/defaults/11-yandex-lockbox
-
-# Initialize Yandex Lockbox secrets loading
-if [ -n "${YANDEX_LOCKBOX_SECRET_IDS}" ]; then
-    print_notice "Yandex Lockbox integration enabled"
-    print_notice "Authentication type: ${YANDEX_LOCKBOX_AUTH_TYPE}"
-    print_notice "Secret IDs: ${YANDEX_LOCKBOX_SECRET_IDS}"
-    
-    # Test connectivity if debug mode is enabled
-    if var_true "${DEBUG_YANDEX_LOCKBOX}" ; then
-        test_yandex_lockbox_connectivity
-    fi
-    
-    # Load secrets from Yandex Lockbox
-    load_yandex_lockbox_secrets
-else
-    print_debug "Yandex Lockbox integration disabled (no secret IDs configured)"
-fi
-
 liftoff

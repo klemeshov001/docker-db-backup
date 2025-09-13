@@ -1,0 +1,76 @@
+services:
+  # Example PostgreSQL database
+  postgres-db:
+    hostname: postgres-db-host
+    container_name: postgres-db
+    image: postgres:15-alpine
+    ports:
+      - 5432:5432
+    environment:
+      - POSTGRES_DB=production_db
+      - POSTGRES_USER=db_user
+      - POSTGRES_PASSWORD=secure_password_123
+      - POSTGRES_ROOT_PASSWORD=root_password_456
+    restart: always
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U db_user -d production_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - db-backup-network
+
+
+  # DB Backup service with S3 storage and Yandex CLI integration
+  db-backup:
+    container_name: db-backup-s3-yc-cli
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    volumes:
+      # Mount the authorized_key.json file for Yandex CLI authentication
+      - ../../authorized_key.json:/config/authorized_key.json:ro
+    environment:
+      - TIMEZONE=Europe/Moscow
+      - CONTAINER_NAME=db-backup-s3-yc-cli
+      - CONTAINER_ENABLE_MONITORING=TRUE
+      - CONTAINER_MONITORING_BACKEND=prometheus
+      - DEBUG_MODE=FALSE
+      - LOG_LEVEL=info
+
+      # Yandex Lockbox configuration (manual execution only)
+      - YANDEX_LOCKBOX_SECRET_IDS=${YANDEX_LOCKBOX_SECRET_IDS}
+      - YANDEX_LOCKBOX_AUTH_TYPE=${YANDEX_LOCKBOX_AUTH_TYPE:-yc-cli}
+      - YANDEX_LOCKBOX_METADATA_URL=${YANDEX_LOCKBOX_METADATA_URL:-http://169.254.169.254/computeMetadata/v1/instance/service-accounts/default/token}
+      - YANDEX_LOCKBOX_API_URL=${YANDEX_LOCKBOX_API_URL:-https://payload.lockbox.api.cloud.yandex.net/lockbox/v1/secrets}
+      - DEBUG_YANDEX_LOCKBOX=${DEBUG_YANDEX_LOCKBOX:-FALSE}
+      
+      # Yandex CLI configuration (for yc-cli auth type)
+      - YANDEX_LOCKBOX_YC_PROFILE=${YANDEX_LOCKBOX_YC_PROFILE:-backup-service}
+      - YANDEX_LOCKBOX_YC_SERVICE_ACCOUNT_KEY=${YANDEX_LOCKBOX_YC_SERVICE_ACCOUNT_KEY:-/config/authorized_key.json}
+      - YANDEX_LOCKBOX_YC_CLOUD_ID=${YANDEX_LOCKBOX_YC_CLOUD_ID}
+      - YANDEX_LOCKBOX_YC_FOLDER_ID=${YANDEX_LOCKBOX_YC_FOLDER_ID}
+      #  Global backup configuration
+      - BACKUP_JOB_CONCURRENCY=2
+      - DEFAULT_BACKUP_LOCATION=S3
+      - DEFAULT_CHECKSUM=SHA1
+      - DEFAULT_COMPRESSION=ZSTD
+      - DB01_TYPE=${DB01_TYPE:-postgres}
+      - DB01_HOST=${DB01_HOST:-postgres-db-host}
+      - DB01_NAME=${DB01_NAME:-production_db}
+      - DB01_USER=${DB01_USER:-db_user}
+      - DB01_PASS=${DB01_PASS:-secure_password_123}
+      - DB01_BACKUP_LOCATION=S3
+      - DEFAULT_ENCRYPT=TRUE
+      
+       
+    restart: always
+    networks:
+      - db-backup-network
+    depends_on:
+      postgres-db:
+        condition: service_healthy
+
+networks:
+  db-backup-network:
+    driver: bridge
