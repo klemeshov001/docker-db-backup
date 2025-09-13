@@ -1,0 +1,429 @@
+#!/command/with-contenv bash
+
+# Yandex Lockbox configuration
+YANDEX_LOCKBOX_SECRET_IDS=${YANDEX_LOCKBOX_SECRET_IDS:-""}
+YANDEX_LOCKBOX_METADATA_URL=${YANDEX_LOCKBOX_METADATA_URL:-"http://169.254.169.254/computeMetadata/v1/instance/service-accounts/default/token"}
+YANDEX_LOCKBOX_API_URL=${YANDEX_LOCKBOX_API_URL:-"https://payload.lockbox.api.cloud.yandex.net/lockbox/v1/secrets"}
+
+
+# Get IAM token using different authentication methods
+get_iam_token() {
+    if var_true "${DEBUG_YANDEX_LOCKBOX}" ; then 
+
+        echo "[DEBUG] Getting IAM token using authentication type: ${YANDEX_LOCKBOX_AUTH_TYPE}" >&2
+    fi
+    
+    case "${YANDEX_LOCKBOX_AUTH_TYPE,,}" in
+        "metadata")
+            get_iam_token_from_metadata
+            ;;
+        "yc-cli")
+            get_iam_token_from_yc_cli
+            ;;
+        *)
+            print_error "Unsupported authentication type: ${YANDEX_LOCKBOX_AUTH_TYPE}"
+            print_error "Supported types: metadata, yc-cli"
+            return 1
+            ;;
+    esac
+}
+
+# Get IAM token from Yandex Cloud metadata service
+get_iam_token_from_metadata() {
+    if var_true "${DEBUG_YANDEX_LOCKBOX}" ; then echo "[DEBUG] Getting IAM token from metadata service" >&2; fi
+    
+    local token_response
+    token_response=$(curl -s -H "Metadata-Flavor: Google" "${YANDEX_LOCKBOX_METADATA_URL}" 2>/dev/null)
+    
+    if [ $? -eq 0 ] && [ -n "$token_response" ]; then
+        local access_token
+        access_token=$(echo "$token_response" | jq -r '.access_token' 2>/dev/null)
+        
+        if [ "$access_token" != "null" ] && [ -n "$access_token" ]; then
+            echo "$access_token"
+            if var_true "${DEBUG_YANDEX_LOCKBOX}" ; then echo "[DEBUG] IAM token obtained from metadata successfully" >&2; fi
+            return 0
+        else
+            print_error "Failed to extract access_token from metadata response"
+            return 1
+        fi
+    else
+        print_error "Failed to get IAM token from metadata service"
+        return 1
+    fi
+}
+
+
+# Get IAM token using Yandex CLI
+get_iam_token_from_yc_cli() {
+    if var_true "${DEBUG_YANDEX_LOCKBOX}" ; then echo "[DEBUG] Getting IAM token using Yandex CLI" >&2; fi
+    
+    # Check if yc CLI is available
+    if ! command -v yc >/dev/null 2>&1; then
+        print_error "Yandex CLI (yc) is not installed or not in PATH"
+        return 1
+    fi
+    
+    # Setup Yandex CLI profile if service account key is provided
+    if [ -n "$YANDEX_LOCKBOX_YC_SERVICE_ACCOUNT_KEY" ]; then
+        if var_true "${DEBUG_YANDEX_LOCKBOX}" ; then 
+            echo "[DEBUG] Setting up Yandex CLI profile: ${YANDEX_LOCKBOX_YC_PROFILE}" >&2
+        fi
+        
+        # Create profile if it doesn't exist
+        yc config profile create "${YANDEX_LOCKBOX_YC_PROFILE}" >/dev/null 2>&1
+        
+        # Set service account key for the profile
+        if [ -f "$YANDEX_LOCKBOX_YC_SERVICE_ACCOUNT_KEY" ]; then
+            yc config set service-account-key "$YANDEX_LOCKBOX_YC_SERVICE_ACCOUNT_KEY" --profile "${YANDEX_LOCKBOX_YC_PROFILE}" >/dev/null 2>&1
+        else
+            print_error "Service account key file not found: $YANDEX_LOCKBOX_YC_SERVICE_ACCOUNT_KEY"
+            return 1
+        fi
+        
+        # Set cloud-id if provided
+        if [ -n "$YANDEX_LOCKBOX_YC_CLOUD_ID" ]; then
+            if var_true "${DEBUG_YANDEX_LOCKBOX}" ; then 
+                echo "[DEBUG] Setting cloud-id" >&2
+            fi
+            yc config set cloud-id "$YANDEX_LOCKBOX_YC_CLOUD_ID" --profile "${YANDEX_LOCKBOX_YC_PROFILE}" >/dev/null 2>&1
+        fi
+        
+        # Set folder-id if provided
+        if [ -n "$YANDEX_LOCKBOX_YC_FOLDER_ID" ]; then
+            if var_true "${DEBUG_YANDEX_LOCKBOX}" ; then 
+                echo "[DEBUG] Setting folder-id" >&2
+            fi
+            yc config set folder-id "$YANDEX_LOCKBOX_YC_FOLDER_ID" --profile "${YANDEX_LOCKBOX_YC_PROFILE}" >/dev/null 2>&1
+        fi
+    fi
+    
+    # Get IAM token using yc CLI
+    local iam_token
+    iam_token=$(yc iam create-token --profile "${YANDEX_LOCKBOX_YC_PROFILE}" 2>/dev/null)
+    
+    if [ $? -eq 0 ] && [ -n "$iam_token" ]; then
+        echo "$iam_token"
+        if var_true "${DEBUG_YANDEX_LOCKBOX}" ; then echo "[DEBUG] IAM token obtained from Yandex CLI successfully" >&2; fi
+        return 0
+    else
+        print_error "Failed to get IAM token from Yandex CLI"
+        if var_true "${DEBUG_YANDEX_LOCKBOX}" ; then 
+            echo "[DEBUG] Yandex CLI exit code: $?" >&2
+            echo "[DEBUG] Profile: ${YANDEX_LOCKBOX_YC_PROFILE}" >&2
+        fi
+        return 1
+    fi
+}
+
+
+# Get secret from Yandex Lockbox
+get_secret() {
+    local secret_id="$1"
+    
+    if var_true "${DEBUG_YANDEX_LOCKBOX}" ; then 
+        echo "[DEBUG] Starting to get secret: ${secret_id}" >&2
+    fi
+    
+    if [ -z "$secret_id" ]; then
+        print_error "Secret ID is required"
+        return 1
+    fi
+    
+    print_notice "Getting secret from Yandex Lockbox: ${secret_id}"
+    
+    # Get IAM token
+    local iam_token
+    iam_token=$(get_iam_token)
+    local iam_token_exit_code=$?
+    
+    if [ $iam_token_exit_code -ne 0 ] || [ -z "$iam_token" ]; then
+        print_error "Failed to get IAM token for secret ${secret_id}"
+        if var_true "${DEBUG_YANDEX_LOCKBOX}" ; then 
+            echo "[DEBUG] IAM token exit code: $iam_token_exit_code" >&2
+        fi
+        return 1
+    fi
+    
+    if var_true "${DEBUG_YANDEX_LOCKBOX}" ; then 
+        echo "[DEBUG] IAM token obtained successfully" >&2
+    fi
+    
+    # Get secret payload
+    local secret_response
+    local temp_file="/tmp/${secret_id}_secrets.json"
+    
+    if [ "${YANDEX_LOCKBOX_AUTH_TYPE,,}" = "yc-cli" ]; then
+        # Use Yandex CLI to get secret payload
+        secret_response=$(yc lockbox payload get --id "${secret_id}" --profile "${YANDEX_LOCKBOX_YC_PROFILE}" --format json 2>/dev/null)
+    else
+        # Use direct API call
+        secret_response=$(curl -s -X GET \
+            -H "Authorization: Bearer ${iam_token}" \
+            "${YANDEX_LOCKBOX_API_URL}/${secret_id}/payload" 2>/dev/null)
+    fi
+    
+    if [ $? -eq 0 ] && [ -n "$secret_response" ]; then
+        echo "$secret_response" > "$temp_file"
+        
+        if var_true "${DEBUG_YANDEX_LOCKBOX}" ; then 
+            echo "[DEBUG] Lockbox API response received for secret ${secret_id}" >&2
+        fi
+        
+        # Check if response contains error
+        if echo "$secret_response" | jq -e '.error' >/dev/null 2>&1; then
+            local error_message
+            error_message=$(echo "$secret_response" | jq -r '.error.message' 2>/dev/null)
+            print_error "Lockbox API error for secret ${secret_id}: ${error_message}"
+            rm -f "$temp_file"
+            return 1
+        fi
+        
+        # Process secret entries
+        local secrets_file="/tmp/secrets_${secret_id}.sh"
+        local id_items=0
+        
+        # Clear previous secrets file
+        > "$secrets_file"
+        
+        while IFS= read -r line; do
+            local entry
+            # Try different value fields that might be used in Lockbox
+            entry=$(jq -r --argjson index $id_items '.entries[$index | tonumber] | "\(.key)=\(.text_value // .textValue // .value // .binaryValue // "null")"' "$temp_file" 2>/dev/null)
+            
+            if [ $? -eq 0 ] && [ -n "$entry" ] && [ "$entry" != "null=null" ]; then
+                # Properly escape the value for shell export
+                local var_name="${entry%%=*}"
+                local var_value="${entry#*=}"
+                # Escape special characters in the value
+                var_value=$(printf '%q' "$var_value")
+                echo "export ${var_name}=${var_value}" >> "$secrets_file"
+                if var_true "${DEBUG_YANDEX_LOCKBOX}" ; then 
+                    echo "[DEBUG] Added secret: ${var_name}" >&2
+                fi
+            else
+                if var_true "${DEBUG_YANDEX_LOCKBOX}" ; then 
+                    echo "[DEBUG] Skipped entry (index $id_items)" >&2
+                fi
+            fi
+            
+            ((id_items++))
+        done < <(jq -c '.entries[]' "$temp_file" 2>/dev/null)
+        
+        # Make secrets file executable and export variables to global environment
+        if [ -s "$secrets_file" ]; then
+            chmod 755 "$secrets_file"
+            print_notice "Loaded ${id_items} secrets from Lockbox secret ${secret_id}"
+            
+            if var_true "${DEBUG_YANDEX_LOCKBOX}" ; then 
+                echo "[DEBUG] Secrets file created successfully" >&2
+            fi
+            
+            # Export variables to global environment
+            local container_env_file="/etc/container_environment"
+            local global_env_file="/etc/environment"
+            
+            # Method 1: For s6-overlay containers, write to individual environment files
+            if [ -d "$container_env_file" ]; then
+                while IFS= read -r line; do
+                    if [[ "$line" =~ ^export[[:space:]]+([^=]+)=(.*)$ ]]; then
+                        local var_name="${BASH_REMATCH[1]}"
+                        local var_value="${BASH_REMATCH[2]}"
+                        # Remove quotes if present and unescape
+                        var_value=$(echo "$var_value" | sed 's/^"//;s/"$//')
+                        # Unescape the value for environment files
+                        var_value=$(printf '%b' "$var_value")
+                        echo "$var_value" > "${container_env_file}/${var_name}"
+                        if var_true "${DEBUG_YANDEX_LOCKBOX}" ; then 
+                            echo "[DEBUG] Exported variable to container environment: ${var_name}" >&2
+                        fi
+                    fi
+                done < "$secrets_file"
+            fi
+            
+            # Method 2: Create a profile script that will be sourced by all processes
+            local profile_script="/etc/profile.d/lockbox-secrets.sh"
+            if [ -w "$(dirname "$profile_script")" ]; then
+                while IFS= read -r line; do
+                    if [[ "$line" =~ ^export[[:space:]]+([^=]+)=(.*)$ ]]; then
+                        local var_name="${BASH_REMATCH[1]}"
+                        local var_value="${BASH_REMATCH[2]}"
+                        # Remove quotes if present and unescape
+                        var_value=$(echo "$var_value" | sed 's/^"//;s/"$//')
+                        # Unescape the value for environment files
+                        var_value=$(printf '%b' "$var_value")
+                        # Remove existing line if present
+                        sed -i "/^export ${var_name}=/d" "$profile_script" 2>/dev/null || true
+                        # Add new line
+                        echo "export ${var_name}=\"${var_value}\"" >> "$profile_script"
+                        if var_true "${DEBUG_YANDEX_LOCKBOX}" ; then 
+                            echo "[DEBUG] Exported variable to profile script: ${var_name}" >&2
+                        fi
+                    fi
+                done < "$secrets_file"
+                chmod 644 "$profile_script"
+            fi
+            
+            # Method 3: Append to global environment file for all processes
+            if [ -f "$global_env_file" ] || [ -w "$(dirname "$global_env_file")" ]; then
+                while IFS= read -r line; do
+                    if [[ "$line" =~ ^export[[:space:]]+([^=]+)=(.*)$ ]]; then
+                        local var_name="${BASH_REMATCH[1]}"
+                        local var_value="${BASH_REMATCH[2]}"
+                        # Remove quotes if present and unescape
+                        var_value=$(echo "$var_value" | sed 's/^"//;s/"$//')
+                        # Unescape the value for environment files
+                        var_value=$(printf '%b' "$var_value")
+                        # Remove existing line if present
+                        sed -i "/^${var_name}=/d" "$global_env_file" 2>/dev/null || true
+                        # Add new line
+                        echo "${var_name}=${var_value}" >> "$global_env_file"
+                        if var_true "${DEBUG_YANDEX_LOCKBOX}" ; then 
+                            echo "[DEBUG] Exported variable to global environment: ${var_name}" >&2
+                        fi
+                    fi
+                done < "$secrets_file"
+            fi
+            
+            # Method 3: Fallback - source the secrets file (original behavior)
+            source "$secrets_file"
+            
+            # Clean up temporary files
+            rm -f "$temp_file" "$secrets_file"
+            return 0
+        else
+            print_warn "No valid secrets found in Lockbox secret ${secret_id}"
+            rm -f "$temp_file" "$secrets_file"
+            return 1
+        fi
+    else
+        print_error "Failed to get secret ${secret_id} from Lockbox API"
+        return 1
+    fi
+    
+    if var_true "${DEBUG_YANDEX_LOCKBOX}" ; then 
+        echo "[DEBUG] Function completed" >&2
+    fi
+}
+
+# Load all secrets from Yandex Lockbox
+load_yandex_lockbox_secrets() {
+    if var_true "${DEBUG_YANDEX_LOCKBOX}" ; then 
+        echo "[DEBUG] Function started" >&2
+    fi
+    
+    if [ -z "$YANDEX_LOCKBOX_SECRET_IDS" ]; then
+        if var_true "${DEBUG_YANDEX_LOCKBOX}" ; then echo "[DEBUG] No Yandex Lockbox secret IDs configured" >&2; fi
+        return 0
+    fi
+    
+    print_notice "Loading secrets from Yandex Lockbox"
+    
+    # Split comma-separated secret IDs
+    IFS=',' read -ra SECRET_IDS <<< "$YANDEX_LOCKBOX_SECRET_IDS"
+    
+    local success_count=0
+    local total_count=${#SECRET_IDS[@]}
+    
+    for secret_id in "${SECRET_IDS[@]}"; do
+        # Trim whitespace
+        secret_id=$(echo "$secret_id" | xargs)
+        
+        if [ -n "$secret_id" ]; then
+            if get_secret "$secret_id"; then
+                ((success_count++))
+            else
+                print_error "Failed to load secret: ${secret_id}"
+            fi
+        fi
+    done
+    
+    if [ $success_count -eq $total_count ]; then
+        print_notice "Successfully loaded all ${total_count} secrets from Yandex Lockbox"
+    else
+        print_warn "Loaded ${success_count}/${total_count} secrets from Yandex Lockbox"
+    fi
+    
+    
+    if var_true "${DEBUG_YANDEX_LOCKBOX}" ; then 
+        echo "[DEBUG] Function completed" >&2
+    fi
+}
+
+# Test Yandex Lockbox connectivity
+test_yandex_lockbox_connectivity() {
+    if var_true "${DEBUG_YANDEX_LOCKBOX}" ; then 
+        echo "[DEBUG] Function started" >&2
+    fi
+    
+    print_notice "Testing Yandex Lockbox connectivity"
+    print_notice "Authentication type: ${YANDEX_LOCKBOX_AUTH_TYPE}"
+    
+    case "${YANDEX_LOCKBOX_AUTH_TYPE,,}" in
+        "metadata")
+            test_metadata_connectivity
+            ;;
+        "yc-cli")
+            test_yc_cli_connectivity
+            ;;
+        *)
+            print_error "Unsupported authentication type: ${YANDEX_LOCKBOX_AUTH_TYPE}"
+            return 1
+            ;;
+    esac
+    
+    if var_true "${DEBUG_YANDEX_LOCKBOX}" ; then 
+        echo "[DEBUG] Function completed" >&2
+    fi
+}
+
+# Test metadata service connectivity
+test_metadata_connectivity() {
+    print_notice "Testing metadata service connectivity"
+    
+    local metadata_response
+    metadata_response=$(curl -s -H "Metadata-Flavor: Google" "${YANDEX_LOCKBOX_METADATA_URL}" 2>/dev/null)
+    
+    if [ $? -eq 0 ] && [ -n "$metadata_response" ]; then
+        print_notice "✓ Metadata service is accessible"
+        
+        # Test IAM token retrieval
+        local iam_token
+        iam_token=$(get_iam_token_from_metadata)
+        if [ $? -eq 0 ]; then
+            print_notice "✓ IAM token retrieval successful"
+            return 0
+        else
+            print_error "✗ IAM token retrieval failed"
+            return 1
+        fi
+    else
+        print_error "✗ Metadata service is not accessible"
+        return 1
+    fi
+}
+
+
+# Test Yandex CLI connectivity
+test_yc_cli_connectivity() {
+    print_notice "Testing Yandex CLI connectivity"
+    
+    # Check if yc CLI is available
+    if ! command -v yc >/dev/null 2>&1; then
+        print_error "✗ Yandex CLI (yc) is not installed or not in PATH"
+        return 1
+    fi
+    
+    print_notice "✓ Yandex CLI is available"
+    
+    # Test IAM token retrieval
+    local iam_token
+    iam_token=$(get_iam_token_from_yc_cli)
+    if [ $? -eq 0 ]; then
+        print_notice "✓ IAM token retrieval successful"
+        return 0
+    else
+        print_error "✗ IAM token retrieval failed"
+        return 1
+    fi
+}

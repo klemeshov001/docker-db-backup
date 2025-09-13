@@ -1,0 +1,17 @@
+#!/command/with-contenv bash
+
+# Yandex Lockbox configuration
+YANDEX_LOCKBOX_SECRET_IDS=${YANDEX_LOCKBOX_SECRET_IDS:-""}
+YANDEX_LOCKBOX_METADATA_URL=${YANDEX_LOCKBOX_METADATA_URL:-"http://169.254.169.254/computeMetadata/v1/instance/service-accounts/default/token"}
+YANDEX_LOCKBOX_API_URL=${YANDEX_LOCKBOX_API_URL:-"https://payload.lockbox.api.cloud.yandex.net/lockbox/v1/secrets"}
+
+# Authentication configuration
+YANDEX_LOCKBOX_AUTH_TYPE=${YANDEX_LOCKBOX_AUTH_TYPE:-"metadata"}  # metadata or yc-cli
+
+# Yandex CLI configuration
+YANDEX_LOCKBOX_YC_PROFILE=${YANDEX_LOCKBOX_YC_PROFILE:-"default"}  # Yandex CLI profile name
+YANDEX_LOCKBOX_YC_SERVICE_ACCOUNT_KEY=${YANDEX_LOCKBOX_YC_SERVICE_ACCOUNT_KEY:-""}  # Path to service account key file for yc config
+YANDEX_LOCKBOX_YC_CLOUD_ID=${YANDEX_LOCKBOX_YC_CLOUD_ID:-""}  # Yandex Cloud ID
+YANDEX_LOCKBOX_YC_FOLDER_ID=${YANDEX_LOCKBOX_YC_FOLDER_ID:-""}  # Yandex Cloud Folder ID
+
+DEBUG_YANDEX_LOCKBOX=${DEBUG_YANDEX_LOCKBOX:-"FALSE"}

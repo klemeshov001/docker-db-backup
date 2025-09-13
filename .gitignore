@@ -1,0 +1,84 @@
+# Environment files
+*.env
+.env.*
+!env.example
+
+# Database files
+*.sql
+*.db
+*.sqlite
+*.sqlite3
+*.sql.zst.gpg
+
+# Backup files
+*.backup
+*.bak
+*.dump
+*.gz
+*.tar
+*.zip
+
+# Log files
+*.log
+logs/
+log/
+
+# Temporary files
+*.tmp
+*.temp
+/tmp/
+temp/
+
+# Process files
+*.pid
+*.sock
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Docker
+.dockerignore
+
+# Service account keys and credentials
+authorized_key.json
+service-account-key.json
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+
+# Yandex Cloud credentials
+yc_config
+.yc/
+
+# Lockbox secrets
+secrets_*.sh
+*_secrets.json
+
+# Container environment
+/etc/container_environment/
+/etc/environment
+/etc/profile.d/lockbox-secrets.sh
+
+# Backup directories
+backups/
+backup/
+restore/
+
+# Test files
+test_*
+*_test.*

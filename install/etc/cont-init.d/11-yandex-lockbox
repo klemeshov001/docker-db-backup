@@ -1,0 +1,8 @@
+#!/command/with-contenv bash
+
+source /assets/functions/00-container
+prepare_service single
+PROCESS_NAME="yandex-lockbox"
+output_off
+
+liftoff

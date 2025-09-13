@@ -4,6 +4,9 @@ source /assets/functions/00-container
 PROCESS_NAME="db-backup{{BACKUP_NUMBER}}-scheduler"
 check_container_initialized
 check_service_initialized init 10-db-backup
+
+# Yandex Lockbox secrets are loaded by 10-db-backup function during initialization
+
 source /assets/functions/10-db-backup
 source /assets/defaults/10-db-backup
 bootstrap_variables backup_init {{BACKUP_NUMBER}}
@@ -88,6 +91,17 @@ while true; do
         print_debug "Backup {{BACKUP_NUMBER}} routines started time: $(date +'%Y-%m-%d %T %Z')"
         bootstrap_filesystem
         check_availability
+        
+        # Yandex Lockbox secrets should be loaded manually via docker exec or init script
+        # Uncomment the following lines to enable automatic loading:
+        # if [ -f "/assets/functions/11-yandex-lockbox" ] && [ -n "$YANDEX_LOCKBOX_SECRET_IDS" ]; then
+        #     if [ -f "/assets/defaults/11-yandex-lockbox" ]; then
+        #         source /assets/defaults/11-yandex-lockbox
+        #     fi
+        #     source /assets/functions/11-yandex-lockbox
+        #     load_yandex_lockbox_secrets
+        # fi
+        
         backup_"${dbtype,,}"
         timer job stop
         if [ -z "${exitcode_backup}" ] ; then exitcode_backup="0" ; fi
