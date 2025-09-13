@@ -116,6 +116,12 @@ RUN source /assets/functions/00-container && \
     pip3 install --break-system-packages awscli==${AWS_CLI_VERSION} && \
     pip3 install --break-system-packages blobxfer && \
     \
+    # Install Yandex CLI (yc) \
+    curl -sSL https://storage.yandexcloud.net/yandexcloud-yc/install.sh | bash && \
+    mv /root/yandex-cloud/bin/yc /usr/local/bin/ && \
+    chmod +x /usr/local/bin/yc && \
+    rm -rf /root/yandex-cloud && \
+    \
     mkdir -p /usr/src/pbzip2 && \
     curl -sSL https://launchpad.net/pbzip2/1.1/1.1.13/+download/pbzip2-1.1.13.tar.gz | tar xvfz - --strip=1 -C /usr/src/pbzip2 && \
     cd /usr/src/pbzip2 && \
